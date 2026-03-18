@@ -48,7 +48,7 @@ if st.button("🚀 Аналізувати"):
         
         if "akmi" in medical_files:
             try:
-                model = genai.GenerativeModel('gemini-3-flash')
+                model = genai.GenerativeModel('gemini-3-flash-preview')
                 
                 # ЛОГІКА: Перевірка на потребу в ДСГ
                 complex_markers = ["пухлин", "зоб", "уламк", "стороннє тіло", "міксома", "тератома"]
