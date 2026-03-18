@@ -3,10 +3,10 @@ import google.generativeai as genai
 import time
 
 # 1. Налаштування сторінки
-st.set_page_config(page_title="AKMI & DRG Assistant", page_icon="🫀", layout="wide")
+st.set_page_config(page_title="AKMI Precision Tool", page_icon="🫀", layout="wide")
 
-st.title("🫀 Асистент кодування: АКМІ + ДСГ + МКХ-10")
-st.caption("Професійний інструмент для кардіохірургів (Версія 2026)")
+st.title("🫀 Кардіохірургічний асистент: АКМІ та Спец-Аудит")
+st.caption("Версія 2.0: Оптимізація токенів та фокус на складних втручаннях")
 
 # 2. API Ключ
 if "GEMINI_API_KEY" in st.secrets:
@@ -15,23 +15,24 @@ else:
     st.error("❌ Додайте GEMINI_API_KEY у Secrets.")
     st.stop()
 
-# 3. Функція завантаження файлів у Google AI (File API)
+# 3. Функція завантаження файлів
 @st.cache_resource
 def upload_medical_bases():
-    files = []
-    # Назви файлів з твого репозиторію
-    file_names = ["nk-026_2021_.pdf", "36897-dn_798_12_05_2022_dod.pdf"]
+    files = {}
+    file_configs = {
+        "akmi": "nk-026_2021_.pdf",
+        "dsg": "36897-dn_798_12_05_2022_dod.pdf"
+    }
     
-    for name in file_names:
-        with st.spinner(f"Завантаження бази {name}..."):
-            try:
-                uploaded_file = genai.upload_file(path=name)
-                while uploaded_file.state.name == "PROCESSING":
-                    time.sleep(2)
-                    uploaded_file = genai.get_file(uploaded_file.name)
-                files.append(uploaded_file)
-            except Exception as e:
-                st.error(f"Не вдалося завантажити {name}: {e}")
+    for key, name in file_configs.items():
+        try:
+            uploaded_file = genai.upload_file(path=name)
+            while uploaded_file.state.name == "PROCESSING":
+                time.sleep(1)
+                uploaded_file = genai.get_file(uploaded_file.name)
+            files[key] = uploaded_file
+        except Exception as e:
+            st.error(f"Помилка завантаження {name}: {e}")
     return files
 
 # 4. Основний інтерфейс
@@ -39,72 +40,53 @@ col1, col2 = st.columns([1, 1])
 
 with col1:
     st.subheader("Протокол операції")
-    protocol = st.text_area("Вставте текст протоколу:", height=500)
+    protocol = st.text_area("Текст протоколу:", height=500)
     
-if st.button("✨ Сформувати пакет документів"):
+if st.button("🚀 Аналізувати"):
     if protocol:
         medical_files = upload_medical_bases()
         
-        if len(medical_files) == 2:
+        if "akmi" in medical_files:
             try:
-                # Використовуємо модель flash для швидкості та контексту
-                model = genai.GenerativeModel('gemini-3-flash-preview')
+                model = genai.GenerativeModel('gemini-3-flash')
                 
-                # --- КРОК 1: Тільки АКМІ ---
-                with st.spinner("Крок 1: Пошук кодів в АКМІ..."):
-                    step1_prompt = f"""
-                    Аналізуй цей ПРОТОКОЛ ОПЕРАЦІЇ. 
-                    Використовуй ТІЛЬКИ перший доданий файл (АКМІ - nk-026_2021_.pdf).
-                    
-                    ЗАВДАННЯ:
-                    1. Визнач усі коди процедур АКМІ, що відповідають протоколу.
-                    2. Якщо операція гібридна або FET — виділи окремо відкриту та ендоваскулярну частини.
-                    3. Поверни ТІЛЬКИ список кодів та їх назви.
+                # ЛОГІКА: Перевірка на потребу в ДСГ
+                complex_markers = ["пухлин", "зоб", "уламк", "стороннє тіло", "міксома", "тератома"]
+                needs_dsg = any(marker in protocol.lower() for marker in complex_markers)
+                
+                # КРОК 1: Клінічний аналіз АКМІ (Максимальний фокус)
+                with st.spinner("Аналіз АКМІ та технічних нюансів..."):
+                    akmi_prompt = f"""
+                    Ти — вузькоспеціалізований кардіохірургічний аудитор. 
+                    ВИМОГИ ДО ТОЧНОСТІ:
+                    1. Гібридна дуга (FET): Це НЕ 33116-00. Це протезування низхідної аорти — 38568-01 + коди на дугу/висхідну.
+                    2. Канюляція: Чітко диференціюй центральну та периферичну (a.femoralis, a.subclavia). Якщо вказано доступ через судину — це периферична.
+                    3. Перфузія: "Глибока гіпотермія" — це температурний режим. Якщо вказана канюляція брахіоцефальних стовбурів — це "Антеградна перфузія мозку". Кодуй її окремо.
+                    4. Використовуй ТІЛЬКИ файл АКМІ.
                     
                     ПРОТОКОЛ:
                     {protocol}
                     """
-                    # Передаємо тільки файл АКМІ (індекс 0)
-                    response1 = model.generate_content([medical_files[0], step1_prompt])
-                    extracted_codes = response1.text
+                    response_akmi = model.generate_content([medical_files["akmi"], akmi_prompt])
+                    extracted_data = response_akmi.text
 
-                # --- КРОК 2: Тільки ДСГ (Наказ 798) ---
-                with st.spinner("Крок 2: Групування за ДСГ..."):
-                    step2_prompt = f"""
-                    Ти — медичний аудитор. Маєш список кодів АКМІ, знайдених у протоколі:
-                    {extracted_codes}
-                    
-                    Використовуй другий доданий файл (Наказ №798 - 36897-dn_798_12_05_2022_dod.pdf).
-                    
-                    ЗАВДАННЯ:
-                    1. Знайди ці коди у таблицях Наказу №798.
-                    2. Визнач відповідну ДСГ. Якщо кодів кілька — вибери ту ДСГ, яка є пріоритетною або найскладнішою.
-                    3. Підбери діагноз МКХ-10.
-                    
-                    ФОРМАТ ВІДПОВІДІ:
-                    - Таблиця: Код АКМІ | Назва | Номер ДСГ | Назва ДСГ
-                    - Список МКХ-10
-                    - Обґрунтування вибору ДСГ
-                    """
-                    # Передаємо тільки файл ДСГ (індекс 1)
-                    response2 = model.generate_content([medical_files[1], step2_prompt])
+                # КРОК 2: Селективний ДСГ (тільки якщо потрібно)
+                final_output = extracted_data
+                if needs_dsg and "dsg" in medical_files:
+                    with st.spinner("Специфічний випадок: Пошук у ДСГ..."):
+                        dsg_prompt = f"""
+                        Виявлено специфічне втручання (пухлина/зоб/уламок). 
+                        Знайди відповідну групу ДСГ у файлі Наказу №798 для цих кодів:
+                        {extracted_data}
+                        """
+                        response_dsg = model.generate_content([medical_files["dsg"], dsg_prompt])
+                        final_output += "\n\n### АУДИТ ДСГ (Специфічний випадок)\n" + response_dsg.text
+                else:
+                    final_output += "\n\n*Аналіз ДСГ пропущено: стандартне кардіохірургічне втручання.*"
 
-                # Виведення результатів
                 with col2:
-                    st.subheader("Результат аналізу")
-                    tab1, tab2 = st.tabs(["📋 Фінальний звіт", "🔍 Знайдені коди АКМІ"])
-                    
-                    with tab1:
-                        st.markdown(response2.text)
-                    
-                    with tab2:
-                        st.info("Результат першого етапу пошуку (АКМІ):")
-                        st.write(extracted_codes)
+                    st.subheader("Результат")
+                    st.markdown(final_output)
                         
             except Exception as e:
-                if "400" in str(e):
-                    st.error("🚨 Помилка 400: Навіть при розділенні файл ДСГ занадто великий для прямого аналізу. Спробуйте скоротити текст протоколу або перевірте структуру файлів.")
-                else:
-                    st.error(f"Помилка: {e}")
-    else:
-        st.warning("Вставте текст протоколу.")
+                st.error(f"Помилка: {e}")
