@@ -50,7 +50,7 @@ if st.button("✨ Сформувати пакет документів"):
         if len(medical_files) == 2:
             try:
                 with st.spinner("Gemini аналізує протокол..."):
-                    model = genai.GenerativeModel('gemini-3-flash')
+                    model = genai.GenerativeModel('gemini-3-flash-preview')
                     
                     # Формуємо запит: Файли йдуть як окремі об'єкти, а не текст
                     prompt = """
