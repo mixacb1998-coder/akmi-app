@@ -54,7 +54,7 @@ try:
         if protocol and knowledge_base:
             with st.spinner("Gemini аналізує складність втручання..."):
                 # Використовуємо модель Flash — вона ідеальна для таких завдань
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                model = genai.GenerativeModel('gemini-3-flash')
                 
                 prompt = f"""
                 Ти — експерт НСЗУ. Твоя база знань з кодами АКМІ:
