@@ -48,7 +48,7 @@ if st.button("🚀 Виконати клінічний аналіз"):
         if "akmi" in medical_files:
             try:
                 # Використовуємо актуальну модель для складних логічних зв'язків
-                model = genai.GenerativeModel('gemini-2.0-flash')
+                model = genai.GenerativeModel('gemini-3-flash-preview')
                 
                 complex_markers = ["пухлин", "зоб", "уламк", "стороннє тіло", "міксома", "тератома"]
                 needs_dsg = any(marker in protocol.lower() for marker in complex_markers)
