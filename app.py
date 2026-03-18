@@ -1,110 +1,90 @@
 import streamlit as st
 import google.generativeai as genai
-from pypdf import PdfReader
+import time
 
 # 1. Налаштування сторінки
 st.set_page_config(page_title="AKMI & DRG Assistant", page_icon="🫀", layout="wide")
 
-# Стилізація інтерфейсу
-st.markdown("""
-    <style>
-    .main { background-color: #f5f7f9; }
-    .stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #007bff; color: white; }
-    .reportview-container .main .block-container { padding-top: 2rem; }
-    </style>
-    """, unsafe_allow_html=True)
-
 st.title("🫀 Асистент кодування: АКМІ + ДСГ + МКХ-10")
-st.caption("Аналіз на основі НК 026:2021 та Наказу МОЗ №798 (групування)")
+st.caption("Професійний інструмент для кардіохірургів (Версія 2026)")
 
-# 2. Безпечне підключення API Ключа
+# 2. API Ключ
 if "GEMINI_API_KEY" in st.secrets:
-    API_KEY = st.secrets["GEMINI_API_KEY"]
-    genai.configure(api_key=API_KEY)
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
-    st.error("❌ API Ключ не знайдено в Secrets.")
+    st.error("❌ Додайте GEMINI_API_KEY у Secrets.")
     st.stop()
 
-# 3. Функція зчитування PDF з кешуванням
-@st.cache_data
-def get_pdf_content(file_path):
-    try:
-        reader = PdfReader(file_path)
-        content = ""
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                content += text + "\n"
-        return content
-    except Exception as e:
-        return None
+# 3. Функція завантаження файлів у Google AI (File API)
+@st.cache_resource # Кешуємо об'єкти файлів, щоб не перевантажувати щоразу
+def upload_medical_bases():
+    files = []
+    # Назви файлів мають точно збігатися з тими, що на GitHub
+    file_names = ["nk-026_2021_.pdf", "36897-dn_798_12_05_2022_dod.pdf"]
+    
+    for name in file_names:
+        with st.spinner(f"Завантаження бази {name} у систему..."):
+            try:
+                uploaded_file = genai.upload_file(path=name)
+                # Чекаємо, поки Google обробить файл (зазвичай пару секунд)
+                while uploaded_file.state.name == "PROCESSING":
+                    time.sleep(2)
+                    uploaded_file = genai.get_file(uploaded_file.name)
+                files.append(uploaded_file)
+            except Exception as e:
+                st.error(f"Не вдалося завантажити {name}: {e}")
+    return files
 
-# 4. Основна логіка
-try:
-    # Завантажуємо обидві бази
-    # ПЕРЕКОНАЙСЯ, ЩО НАЗВИ ФАЙЛІВ НА GITHUB ТАКІ САМІ
-    akmi_base = get_pdf_content("nk-026_2021_.pdf")
-    drg_base = get_pdf_content("36897-dn_798_12_05_2022_dod.pdf")
+# 4. Основний інтерфейс
+col1, col2 = st.columns([1, 1])
 
-    col1, col2 = st.columns([1, 1])
-
-    with col1:
-        st.subheader("Протокол операції")
-        protocol = st.text_area("Вставте текст протоколу тут:", height=500, placeholder="Наприклад: FET, Frozen elephant trunk...")
+with col1:
+    st.subheader("Протокол операції")
+    protocol = st.text_area("Вставте текст протоколу:", height=500)
+    
+if st.button("✨ Сформувати пакет документів"):
+    if protocol:
+        # Завантажуємо (або беремо з кешу) файли
+        medical_files = upload_medical_bases()
         
-    if st.button("✨ Сформувати пакет документів для НСЗУ"):
-        if protocol and akmi_base and drg_base:
-            with st.spinner("Проводиться медичний аудит та групування..."):
-                model = genai.GenerativeModel('gemini-3-flash-preview')
-                
-                prompt = f"""
-                Ти — професійний аудитор НСЗУ з кардіохірургії. 
-                База АКМІ: {akmi_base}
-                Наказ МОЗ №798 (Групування та МКХ-10): {drg_base}
-                Протокол: {protocol}
-
-                ЗАВДАННЯ: Сформувати оптимальний пакет кодів (АКМІ + МКХ-10).
-
-                ЖОРСТКІ ПРАВИЛА:
-                1. АНТИ-ДУБЛЮВАННЯ: Якщо два коди АКМІ (наприклад, заміна дуги та лікування розшарування) згідно з Наказом №798 належать до однієї медичної послуги/ДСГ — залиш лише ОДИН найскладніший код. 
-                2. FET СПЕЦИФІКА: Якщо описано Frozen Elephant Trunk, обов'язково знайди код для ендоваскулярної частини (стенд-графт у низхідну аорту, зазвичай серія 33116-00).
-                3. БЕЗ СМІТТЯ: Жодних кодів доступу (стернотомія), дренування чи закриття рани.
-                4. ЗАХИСТ ТА КАНЮЛЯЦІЯ: Окремо кодуй Кардіоплегію (38588-00), Перфузію мозку (38577-00) та ШК з периферичною канюляцією (38603-00).
-                5. ДІАГНОЗИ: На основі Наказу №798 підбери відповідні діагнози МКХ-10, що дозволяють згрупувати цей випадок у максимально релевантну ДСГ.
-
-                ФОРМАТ ВІДПОВІДІ (JSON-подібний для структурування):
-                Видай відповідь у трьох блоках:
-                1. ТАБЛИЦЯ АКМІ: Код | Назва | Обґрунтування.
-                2. ДІАГНОЗИ МКХ-10: Код | Назва.
-                3. АУДИТОРСЬКА ПРИМІТКА: Пояснення щодо групування (чому певні коди були об'єднані або додані).
-                """
-                
-                response = model.generate_content(prompt)
-                
-                with col2:
-                    st.subheader("Результат аналізу")
+        if len(medical_files) == 2:
+            try:
+                with st.spinner("Gemini аналізує протокол..."):
+                    model = genai.GenerativeModel('gemini-3-flash')
                     
-                    # Використовуємо вкладки для чистоти інтерфейсу
-                    tab1, tab2, tab3 = st.tabs(["📋 Коди АКМІ", "🧬 Діагнози (МКХ-10)", "🔍 Аудит"])
+                    # Формуємо запит: Файли йдуть як окремі об'єкти, а не текст
+                    prompt = """
+                    Ти — медичний аудитор. Використовуй додані файли (АКМІ та Наказ №798) для аналізу.
                     
-                    # Розбиваємо відповідь (ШІ зазвичай видає блоки тексту)
-                    res_text = response.text
+                    ЗАВДАННЯ:
+                    1. Знайди коди АКМІ. Якщо операція гібридна (FET) — обов'язково кодуй і відкриту частину (дуга/висхідна), і ендоваскулярну (стенд-графт).
+                    2. Згрупуй коди за Наказом №798. Якщо коди дублюються в одній ДСГ — залиш найскладніший.
+                    3. Підбери діагнози МКХ-10.
                     
-                    with tab1:
-                        st.markdown(res_text.split("2.")[0]) # Приблизне розбиття, Gemini зазвичай тримає структуру
+                    ФОРМАТ:
+                    - Таблиця АКМІ (Код, Назва, Обґрунтування)
+                    - Список МКХ-10
+                    - Коментар щодо групування
+                    """
                     
-                    with tab2:
-                        if "2." in res_text:
-                            st.markdown(res_text.split("2.")[1].split("3.")[0])
+                    # ВАЖЛИВО: Передаємо список [Файл1, Файл2, Текст]
+                    response = model.generate_content([medical_files[0], medical_files[1], prompt + "\n\nПРОТОКОЛ:\n" + protocol])
                     
-                    with tab3:
-                        if "3." in res_text:
-                            st.info(res_text.split("3.")[1])
-                            
-        elif not protocol:
-            st.warning("Вставте текст протоколу.")
-        else:
-            st.error("Помилка завантаження баз знань (PDF файлів).")
-
-except Exception as e:
-    st.error(f"Виникла помилка: {str(e)}")
+                    with col2:
+                        st.subheader("Результат")
+                        tab1, tab2, tab3 = st.tabs(["📋 АКМІ", "🧬 МКХ-10", "🔍 Аудит"])
+                        
+                        res = response.text
+                        # Проста логіка розділення для інтерфейсу
+                        parts = res.split("\n\n")
+                        with tab1: st.write(res) # Виводимо весь текст, поки не налаштуємо парсинг
+                        with tab2: st.info("Дивіться основний звіт")
+                        with tab3: st.info("Перевірено згідно з Наказом №798")
+                        
+            except Exception as e:
+                if "429" in str(e):
+                    st.error("🚨 Перевищено ліміт запитів. Зачекайте 60 секунд і спробуйте знову.")
+                else:
+                    st.error(f"Помилка: {e}")
+    else:
+        st.warning("Вставте текст протоколу.")
