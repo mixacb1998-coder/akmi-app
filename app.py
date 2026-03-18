@@ -42,7 +42,7 @@ def get_pdf_content(file_path):
 # 4. Основна логіка
 try:
     # Завантажуємо базу кодів із файлу database.pdf
-    knowledge_base = get_pdf_content("database.pdf")
+    knowledge_base = get_pdf_content("nk-026_2021_.pdf")
 
     col1, col2 = st.columns([1, 1])
 
