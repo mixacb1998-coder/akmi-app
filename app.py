@@ -5,8 +5,8 @@ import time
 # 1. Налаштування сторінки
 st.set_page_config(page_title="AKMI Surgeon Precision", page_icon="🫀", layout="wide")
 
-st.title("🫀 Клінічний асистент кардіохірурга: АКМІ")
-st.caption("Версія 2.2: Логіка максимальної комбінації кодів")
+st.title("Клінічний асистент кардіохірурга: АКМІ")
+st.caption("Версія 0.5 (Beta)")
 
 # 2. API Ключ
 if "GEMINI_API_KEY" in st.secrets:
